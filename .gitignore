@@ -1,0 +1,7 @@
+node_modules
+dist
+.env
+class-agent.db
+class-agent.db-*
+.baileys-auth
+uploads
