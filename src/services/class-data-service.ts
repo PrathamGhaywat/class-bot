@@ -474,6 +474,31 @@ export class ClassDataService {
       }));
   }
 
+  getKnowledgeById(id: string): KnowledgeDocument | null {
+    const row = this.db
+      .prepare<[string], KnowledgeRow>(
+        `SELECT id, title, source_type, file_path, mime_type, content_text, created_at, updated_at
+         FROM knowledge_documents
+         WHERE id = ?`,
+      )
+      .get(id);
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      title: row.title,
+      sourceType: row.source_type,
+      filePath: row.file_path,
+      mimeType: row.mime_type,
+      contentText: row.content_text,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
   createKnowledge(input: KnowledgeInput): KnowledgeDocument {
     const createdAt = nowIso();
     const item: KnowledgeDocument = {

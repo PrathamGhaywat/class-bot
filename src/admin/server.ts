@@ -5,6 +5,7 @@ import { promises as fs } from "fs";
 import { fileURLToPath } from "url";
 import { z } from "zod";
 import type { ClassDataService } from "../services/class-data-service.js";
+import type { FileTextExtractor } from "../services/file-text-extractor.js";
 import { syncKnownGroupsFromWhatsApp } from "../whatsapp/bot.js";
 import { clearAuthCookie, createAdminToken, requireAuth, setAuthCookie } from "./auth.js";
 
@@ -53,15 +54,6 @@ const groupJidSchema = z.object({
   jid: z.string().min(1).regex(/@g\.us$/, "Group JID must end with @g.us"),
 });
 
-async function readTextContent(filePath: string, mimeType: string): Promise<string> {
-  if (mimeType.startsWith("text/") || mimeType.includes("json")) {
-    return fs.readFile(filePath, "utf8");
-  }
-
-  // Images and other binaries can still be indexed through manual context notes.
-  return "";
-}
-
 function getRouteId(req: Request, res: Response): string | null {
   const id = req.params.id;
   if (typeof id !== "string" || id.trim().length === 0) {
@@ -94,6 +86,7 @@ export async function createAdminServer(options: {
   dataService: ClassDataService;
   adminPassword: string;
   knowledgeDir: string;
+  fileTextExtractor: FileTextExtractor;
 }) {
   const app = express();
   const authMiddleware = requireAuth(options.adminPassword);
@@ -367,8 +360,12 @@ export async function createAdminServer(options: {
 
       const manualContext =
         typeof req.body.contentText === "string" ? req.body.contentText.trim() : "";
-      const extractedText = await readTextContent(req.file.path, req.file.mimetype);
-      const finalContent = [manualContext, extractedText].filter(Boolean).join("\n\n").trim();
+      const extraction = await options.fileTextExtractor.extractFromFile(req.file.path, req.file.mimetype);
+      if (extraction.warning) {
+        console.warn(`[Upload] Text extraction warning (${req.file.originalname}): ${extraction.warning}`);
+      }
+
+      const finalContent = [manualContext, extraction.text].filter(Boolean).join("\n\n").trim();
 
       const item = options.dataService.createKnowledge({
         title,
@@ -378,7 +375,7 @@ export async function createAdminServer(options: {
         contentText:
           finalContent.length > 0
             ? finalContent
-            : "Binary file uploaded. Add a context note so the bot can use it.",
+            : "File uploaded. No readable text was extracted; add a context note for better answers.",
       });
 
       res.status(201).json({ item });

@@ -4,6 +4,7 @@ This project is a class assistant that:
 - listens to WhatsApp messages via **Baileys**
 - triggers when it sees a configured mention alias (default: `@prgh`)
 - answers with class context (homework, timetable, appointments, tests, uploaded knowledge)
+- extracts text from uploaded PDFs and runs OCR on uploaded images/documents
 - provides a password-protected admin panel for managing data and uploads
 
 ## Stack
@@ -13,6 +14,7 @@ This project is a class assistant that:
 - Vercel AI SDK (`ai`) + OpenAI provider (`@ai-sdk/openai`)
 - Express + Multer
 - SQLite (`better-sqlite3`)
+- OCR + file parsing (`tesseract.js`, `pdf-parse`)
 - Simple HTML/CSS/JS admin frontend
 
 ## Setup
@@ -40,12 +42,14 @@ OPENAI_API_KEY=
 OPENAI_BASE_URL=
 OPENAI_PROVIDER_NAME=openai
 OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_MODE=chat
 MENTION_ALIASES=prgh
 WHATSAPP_AUTH_DIR=.baileys-auth
 WHATSAPP_ALLOWED_GROUP_JID=
 WHATSAPP_ALLOWED_GROUP_JIDS=
 WHATSAPP_PAIRING_PHONE=
 KNOWLEDGE_DIR=uploads
+OCR_LANGUAGES=eng+deu
 ENABLE_WHATSAPP_BOT=true
 ```
 
@@ -151,9 +155,10 @@ Admin panel:
 
 ## WhatsApp behavior
 
-- Bot checks incoming message text/caption.
+- Bot checks incoming message text/caption and can extract text from attached images/documents.
 - Bot only processes messages from group chats that are allowed in the admin panel.
-- If a configured alias is mentioned (e.g. `@prgh`) and text exists after the mention, that trailing text becomes the prompt.
+- If a configured alias is mentioned (e.g. `@prgh`), the trailing text becomes the prompt.
+- If an image/document is attached, extracted text is appended to the prompt automatically.
 - Bot replies in the same chat, quoted to the original message.
 - On first link, it prints a scannable terminal QR.
 - Optional: set `WHATSAPP_PAIRING_PHONE` (E.164 number, digits only) to print a pairing code as an alternative login flow.
@@ -172,5 +177,7 @@ All data is stored in local `class-agent.db`.
 
 - If `OPENAI_API_KEY` is not set, the bot uses a local retrieval fallback instead of LLM calls.
 - For OpenAI-compatible providers, set `OPENAI_BASE_URL` and optionally `OPENAI_PROVIDER_NAME`.
-- Uploaded binary files (such as images) should include a context note so the bot can use meaningful text.
+- Uploaded PDFs are auto-parsed for text; scanned/image-only PDFs automatically fall back to Tesseract OCR.
+- Images are OCR-processed automatically.
+- For low-quality scans, adding a manual context note still improves answer quality.
 - First WhatsApp run shows a QR in terminal; scan it to link the session.

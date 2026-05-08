@@ -2,13 +2,16 @@ import { ToolLoopAgent, generateText, tool } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 import type { ClassDataService } from "../services/class-data-service.js";
+import type { FileTextExtractor } from "../services/file-text-extractor.js";
 
 interface AgentOptions {
   openAiModel: string;
+  openAiApiMode: "auto" | "chat" | "responses";
   openAiApiKey: string | undefined;
   openAiBaseUrl: string | undefined;
   openAiProviderName: string;
   hasModelAccess: boolean;
+  fileTextExtractor?: FileTextExtractor;
 }
 
 export class ClassAgent {
@@ -31,13 +34,20 @@ export class ClassAgent {
     this.openai = createOpenAI(providerConfig);
   }
 
+  private getModel() {
+    if (this.options.openAiApiMode === "chat") {
+      return this.openai.chat(this.options.openAiModel);
+    }
+    if (this.options.openAiApiMode === "responses") {
+      return this.openai.responses(this.options.openAiModel);
+    }
+    return this.openai(this.options.openAiModel);
+  }
+
   private createToolLoopAgent() {
     return new ToolLoopAgent({
-      model: this.openai(this.options.openAiModel),
-      instructions: `You are a class assistant for WhatsApp.
-Use tools to answer questions about homework, timetable, appointments, tests, and uploaded context.
-Always prefer concrete facts from tools. If data is missing, say that directly.
-Keep responses concise and student-friendly.`,
+      model: this.getModel(),
+      instructions: `Du bist ein Schülerassistant namens learnbot. dein job ist es die schüler mithilfe von deiner tools zu helfen. sei immer lustig aber verbrauch so wenige tokens wie möglich. wenn du was nicht verstehst, dann schau im knowledgebase über die sache nach, AUßerdem, du schriebst in Whatsapp, also wird normales markdown nicht funktionieren`,
       tools: {
         getHomework: tool({
           description: "Get all homework items.",
@@ -69,6 +79,74 @@ Keep responses concise and student-friendly.`,
             limit: z.number().int().positive().max(10).optional(),
           }),
           execute: async ({ query, limit }) => this.dataService.searchKnowledge(query, limit ?? 6),
+        }),
+        getKnowledgeDocument: tool({
+          description: "Load one knowledge document by ID with full indexed text.",
+          inputSchema: z.object({
+            id: z.string().min(1),
+          }),
+          execute: async ({ id }) => {
+            const doc = this.dataService.getKnowledgeById(id);
+            if (!doc) {
+              return { error: "Knowledge document not found" };
+            }
+
+            const maxContentChars = 6_000;
+            return {
+              id: doc.id,
+              title: doc.title,
+              sourceType: doc.sourceType,
+              mimeType: doc.mimeType,
+              filePath: doc.filePath,
+              contentText: doc.contentText.slice(0, maxContentChars),
+              truncated: doc.contentText.length > maxContentChars,
+            };
+          },
+        }),
+        reExtractKnowledgeFile: tool({
+          description:
+            "Re-run file text extraction/OCR for an uploaded knowledge file and return fresh extracted text.",
+          inputSchema: z.object({
+            id: z.string().min(1),
+          }),
+          execute: async ({ id }) => {
+            const doc = this.dataService.getKnowledgeById(id);
+            if (!doc) {
+              return { error: "Knowledge document not found" };
+            }
+            if (!doc.filePath) {
+              return { error: "Knowledge document has no file attached" };
+            }
+            if (!this.options.fileTextExtractor) {
+              return { error: "File text extractor is not configured" };
+            }
+
+            const extraction = await this.options.fileTextExtractor.extractFromFile(
+              doc.filePath,
+              doc.mimeType ?? undefined,
+            );
+
+            const existingText = doc.contentText.trim();
+            const extractedText = extraction.text.trim();
+            const combined = extractedText.length === 0
+              ? existingText
+              : existingText.includes(extractedText)
+                ? existingText
+                : [existingText, extractedText].filter(Boolean).join("\n\n").trim();
+
+            const updated = this.dataService.updateKnowledgeText(doc.id, {
+              title: doc.title,
+              contentText: combined.length > 0 ? combined : doc.contentText,
+            });
+
+            return {
+              id: updated.id,
+              method: extraction.method,
+              warning: extraction.warning ?? null,
+              extractedTextPreview: extraction.text.slice(0, 3000),
+              updatedContentLength: updated.contentText.length,
+            };
+          },
         }),
       },
     });
@@ -105,7 +183,7 @@ Keep responses concise and student-friendly.`,
     );
 
     const retry = await generateText({
-      model: this.openai(this.options.openAiModel),
+      model: this.getModel(),
       system: `You are a class assistant for WhatsApp.
 Answer ONLY using the provided class data context.
 If the context does not contain the answer, say that clearly.
@@ -126,6 +204,7 @@ Keep responses concise and student-friendly.`,
     try {
       console.log(`[Agent] Calling AI model with prompt: "${prompt}"`);
       console.log(`[Agent] Using model: ${this.options.openAiModel}`);
+      console.log(`[Agent] API mode: ${this.options.openAiApiMode}`);
       console.log(`[Agent] Has API key: ${Boolean(this.options.openAiApiKey)}`);
       console.log(`[Agent] Base URL: ${this.options.openAiBaseUrl || "default"}`);
       

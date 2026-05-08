@@ -10,12 +10,14 @@ const envSchema = z.object({
   OPENAI_BASE_URL: z.string().optional(),
   OPENAI_PROVIDER_NAME: z.string().default("openai"),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
+  OPENAI_API_MODE: z.enum(["auto", "chat", "responses"]).default("chat"),
   MENTION_ALIASES: z.string().default("prgh"),
   WHATSAPP_AUTH_DIR: z.string().default(".baileys-auth"),
   WHATSAPP_ALLOWED_GROUP_JID: z.string().optional(),
   WHATSAPP_ALLOWED_GROUP_JIDS: z.string().default(""),
   WHATSAPP_PAIRING_PHONE: z.string().optional(),
   KNOWLEDGE_DIR: z.string().default("uploads"),
+  OCR_LANGUAGES: z.string().default("eng+deu"),
   ENABLE_WHATSAPP_BOT: z
     .string()
     .default("true")
@@ -35,6 +37,7 @@ export const config = {
   openAiBaseUrl: parsed.data.OPENAI_BASE_URL,
   openAiProviderName: parsed.data.OPENAI_PROVIDER_NAME,
   openAiModel: parsed.data.OPENAI_MODEL,
+  openAiApiMode: parsed.data.OPENAI_API_MODE,
   mentionAliases: parsed.data.MENTION_ALIASES.split(",")
     .map((alias) => alias.trim().toLowerCase())
     .filter(Boolean),
@@ -47,5 +50,6 @@ export const config = {
     .filter(Boolean),
   whatsappPairingPhone: parsed.data.WHATSAPP_PAIRING_PHONE,
   knowledgeDir: parsed.data.KNOWLEDGE_DIR,
+  ocrLanguages: parsed.data.OCR_LANGUAGES,
   enableWhatsAppBot: parsed.data.ENABLE_WHATSAPP_BOT,
 };

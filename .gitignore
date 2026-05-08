@@ -5,3 +5,5 @@ class-agent.db
 class-agent.db-*
 .baileys-auth
 uploads
+deu.traineddata
+eng.traineddata
