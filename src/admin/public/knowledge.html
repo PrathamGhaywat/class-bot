@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Class AI Admin · Knowledge</title>
+    <link rel="stylesheet" href="/admin/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">Class AI Admin</div>
+        <div class="brand-subtitle">Control panel</div>
+        <nav id="sidebar-nav" class="nav"></nav>
+      </aside>
+
+      <div class="content-shell">
+        <header class="topbar">
+          <div>
+            <h1 id="page-title" class="page-title"></h1>
+            <p id="page-subtitle" class="page-subtitle"></p>
+          </div>
+          <div class="toolbar">
+            <button id="refresh-btn" class="btn">Refresh</button>
+            <button id="logout-btn" class="btn-danger">Logout</button>
+          </div>
+        </header>
+
+        <div id="global-status" class="status hidden"></div>
+
+        <main class="page">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Add text note</h2>
+                <p class="section-note">Create direct knowledge entries for definitions, summaries, and reminders.</p>
+              </div>
+            </div>
+            <div class="grid">
+              <input id="doc-title" placeholder="Title" />
+              <textarea id="doc-content" placeholder="Knowledge content"></textarea>
+            </div>
+            <div class="row" style="margin-top: 10px">
+              <button id="add-doc-btn" class="btn-primary" style="width: auto">Add text note</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Upload file</h2>
+                <p class="section-note">Upload PDFs/images/docs. Text extraction + OCR runs automatically.</p>
+              </div>
+            </div>
+            <div class="grid">
+              <input id="file-title" placeholder="Title for upload" />
+              <input id="file-note" placeholder="Optional context note" />
+              <input id="file-input" type="file" />
+            </div>
+            <div class="row" style="margin-top: 10px">
+              <button id="upload-btn" class="btn-ghost" style="width: auto">Upload file</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Manage knowledge</h2>
+                <p class="section-note">Search and edit indexed content inline.</p>
+              </div>
+              <span id="knowledge-count" class="chip muted">0</span>
+            </div>
+            <div class="grid">
+              <input id="knowledge-query" placeholder="Server search (title/content)">
+              <input id="knowledge-filter" placeholder="Local filter for loaded list">
+            </div>
+            <div class="row" style="margin-top: 10px">
+              <button id="search-knowledge-btn" class="btn" style="width: auto">Search</button>
+              <button id="clear-knowledge-query-btn" class="btn" style="width: auto">Clear search</button>
+            </div>
+            <div id="knowledge-list" class="list"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script type="module">
+      import {
+        api,
+        initShell,
+        q,
+        renderEditableList,
+        setStatus,
+        withButtonBusy,
+      } from "/admin/shared.js";
+
+      let knowledgeItems = [];
+
+      function render() {
+        q("knowledge-count").textContent = String(knowledgeItems.length);
+
+        renderEditableList({
+          container: q("knowledge-list"),
+          items: knowledgeItems,
+          emptyMessage: "No knowledge entries yet.",
+          filterText: q("knowledge-filter").value,
+          getTitle: (item) => item.title,
+          getMeta: (item) => `${item.sourceType} • ${item.mimeType || "unknown mime"} • ${(item.contentText || "").slice(0, 200)}`,
+          getBadge: (item) => ({
+            label: item.sourceType,
+            className: item.sourceType === "upload" ? "muted" : "",
+          }),
+          getFields: (item) => [
+            { name: "title", label: "Title", value: item.title },
+            { name: "contentText", label: "Content", type: "textarea", rows: 8, value: item.contentText },
+          ],
+          onSave: (item, payload) => api(`/api/knowledge/${item.id}`, { method: "PUT", body: JSON.stringify(payload) }),
+          onDelete: (item) => api(`/api/knowledge/${item.id}`, { method: "DELETE" }),
+          onAfterChange: refreshData,
+        });
+      }
+
+      async function refreshData() {
+        const query = q("knowledge-query").value.trim();
+        const path = query.length > 0
+          ? `/api/knowledge?query=${encodeURIComponent(query)}`
+          : "/api/knowledge";
+
+        const result = await api(path);
+        knowledgeItems = result.items || [];
+        render();
+      }
+
+      q("knowledge-filter").addEventListener("input", render);
+      q("search-knowledge-btn").onclick = () => refreshData().catch((error) => setStatus(error.message || "Search failed", true));
+      q("clear-knowledge-query-btn").onclick = () => {
+        q("knowledge-query").value = "";
+        void refreshData();
+      };
+
+      q("add-doc-btn").onclick = async () => {
+        try {
+          await withButtonBusy(q("add-doc-btn"), async () => {
+            await api("/api/knowledge-text", {
+              method: "POST",
+              body: JSON.stringify({
+                title: q("doc-title").value,
+                contentText: q("doc-content").value,
+              }),
+            });
+          });
+
+          q("doc-title").value = "";
+          q("doc-content").value = "";
+
+          await refreshData();
+          setStatus("Knowledge text added.");
+        } catch (error) {
+          setStatus(error.message || "Could not add text note", true);
+        }
+      };
+
+      q("upload-btn").onclick = async () => {
+        const fileInput = q("file-input");
+        if (!fileInput.files || fileInput.files.length === 0) {
+          setStatus("Choose a file first.", true);
+          return;
+        }
+
+        try {
+          await withButtonBusy(q("upload-btn"), async () => {
+            const form = new FormData();
+            form.append("file", fileInput.files[0]);
+            form.append("title", q("file-title").value || fileInput.files[0].name);
+            form.append("contentText", q("file-note").value || "");
+            await api("/api/upload", { method: "POST", body: form });
+          });
+
+          q("file-title").value = "";
+          q("file-note").value = "";
+          q("file-input").value = "";
+
+          await refreshData();
+          setStatus("File uploaded and indexed.");
+        } catch (error) {
+          setStatus(error.message || "Upload failed", true);
+        }
+      };
+
+      (async () => {
+        const ok = await initShell({
+          pageKey: "knowledge",
+          title: "Knowledge",
+          subtitle: "Manage notes and uploaded files used for AI retrieval.",
+          onRefresh: refreshData,
+        });
+
+        if (!ok) return;
+        await refreshData();
+      })();
+    </script>
+  </body>
+</html>

@@ -69,7 +69,9 @@ npm start
 Admin panel:
 - Open `http://localhost:3000/admin`
 - Login using `ADMIN_PASSWORD`
-- Add/edit/delete class records
+- Use the sidebar to switch between dedicated pages:
+  - Homework, Timetable, Appointments, Tests, Knowledge, Groups
+- Add/edit/delete records inline on each page
 - Upload files and optional context notes
 
 ## Deploy on Debian VPS with systemd

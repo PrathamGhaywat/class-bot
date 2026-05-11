@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Class AI Admin · Groups</title>
+    <link rel="stylesheet" href="/admin/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">Class AI Admin</div>
+        <div class="brand-subtitle">Control panel</div>
+        <nav id="sidebar-nav" class="nav"></nav>
+      </aside>
+
+      <div class="content-shell">
+        <header class="topbar">
+          <div>
+            <h1 id="page-title" class="page-title"></h1>
+            <p id="page-subtitle" class="page-subtitle"></p>
+          </div>
+          <div class="toolbar">
+            <button id="refresh-btn" class="btn">Refresh</button>
+            <button id="logout-btn" class="btn-danger">Logout</button>
+          </div>
+        </header>
+
+        <div id="global-status" class="status hidden"></div>
+
+        <main class="page">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Allow group access</h2>
+                <p class="section-note">Only allowed groups can trigger bot replies.</p>
+              </div>
+            </div>
+            <div class="grid">
+              <input id="manual-group-jid" placeholder="Group JID (example: 123456-789@g.us)" />
+              <button id="add-group-btn" class="btn-primary">Allow group</button>
+              <button id="sync-groups-btn" class="btn-ghost">Sync groups from WhatsApp</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Allowed groups</h2>
+                <p class="section-note">Groups currently allowed to use the bot.</p>
+              </div>
+              <span id="allowed-count" class="chip allowed">0</span>
+            </div>
+            <input id="allowed-filter" placeholder="Filter allowed groups" />
+            <div id="allowed-groups" class="list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Discovered groups</h2>
+                <p class="section-note">Known groups from WhatsApp session that are not yet allowed.</p>
+              </div>
+              <span id="discovered-count" class="chip muted">0</span>
+            </div>
+            <input id="discovered-filter" placeholder="Filter discovered groups" />
+            <div id="discovered-groups" class="list"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script type="module">
+      import {
+        api,
+        createEmpty,
+        initShell,
+        q,
+        setStatus,
+        withButtonBusy,
+      } from "/admin/shared.js";
+
+      let groups = [];
+
+      function makeGroupCard(group) {
+        const details = document.createElement("details");
+        details.className = "record";
+
+        const summary = document.createElement("summary");
+        const main = document.createElement("div");
+        main.className = "record-main";
+
+        const title = document.createElement("div");
+        title.className = "record-title";
+        title.textContent = group.name || "(Unnamed group)";
+        main.appendChild(title);
+
+        const meta = document.createElement("div");
+        meta.className = "record-meta";
+        meta.textContent = `${group.jid} • last seen ${new Date(group.lastSeenAt).toLocaleString()}`;
+        main.appendChild(meta);
+
+        summary.appendChild(main);
+
+        const badge = document.createElement("span");
+        badge.className = `chip ${group.allowed ? "allowed" : "blocked"}`;
+        badge.textContent = group.allowed ? "allowed" : "blocked";
+        summary.appendChild(badge);
+
+        details.appendChild(summary);
+
+        const body = document.createElement("div");
+        body.className = "record-body";
+
+        const actions = document.createElement("div");
+        actions.className = "record-actions";
+
+        const toggleBtn = document.createElement("button");
+        toggleBtn.className = group.allowed ? "btn-danger" : "btn-primary";
+        toggleBtn.textContent = group.allowed ? "Disallow" : "Allow";
+        toggleBtn.onclick = async () => {
+          try {
+            await withButtonBusy(toggleBtn, async () => {
+              await api(
+                group.allowed
+                  ? `/api/groups/allowed/${encodeURIComponent(group.jid)}`
+                  : "/api/groups/allowed",
+                {
+                  method: group.allowed ? "DELETE" : "POST",
+                  body: group.allowed ? undefined : JSON.stringify({ jid: group.jid }),
+                },
+              );
+            });
+
+            await refreshData();
+            setStatus(group.allowed ? "Group disallowed." : "Group allowed.");
+          } catch (error) {
+            setStatus(error.message || "Could not update group", true);
+          }
+        };
+
+        const copyBtn = document.createElement("button");
+        copyBtn.className = "btn";
+        copyBtn.textContent = "Copy JID";
+        copyBtn.onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(group.jid);
+            setStatus("Copied group JID.");
+          } catch {
+            setStatus("Could not copy JID.", true);
+          }
+        };
+
+        actions.appendChild(toggleBtn);
+        actions.appendChild(copyBtn);
+        body.appendChild(actions);
+
+        details.appendChild(body);
+        return details;
+      }
+
+      function renderGroups() {
+        const allowed = groups.filter((group) => group.allowed);
+        const discovered = groups.filter((group) => !group.allowed);
+
+        q("allowed-count").textContent = String(allowed.length);
+        q("discovered-count").textContent = String(discovered.length);
+
+        const allowedFilter = q("allowed-filter").value.trim().toLowerCase();
+        const discoveredFilter = q("discovered-filter").value.trim().toLowerCase();
+
+        const allowedContainer = q("allowed-groups");
+        const discoveredContainer = q("discovered-groups");
+        allowedContainer.innerHTML = "";
+        discoveredContainer.innerHTML = "";
+
+        const filteredAllowed = allowed.filter((group) => `${group.name || ""} ${group.jid}`.toLowerCase().includes(allowedFilter));
+        const filteredDiscovered = discovered.filter((group) => `${group.name || ""} ${group.jid}`.toLowerCase().includes(discoveredFilter));
+
+        if (filteredAllowed.length === 0) {
+          allowedContainer.appendChild(createEmpty(allowedFilter ? "No matching allowed groups." : "No allowed groups yet."));
+        } else {
+          filteredAllowed.forEach((group) => allowedContainer.appendChild(makeGroupCard(group)));
+        }
+
+        if (filteredDiscovered.length === 0) {
+          discoveredContainer.appendChild(createEmpty(discoveredFilter ? "No matching discovered groups." : "No discovered groups yet."));
+        } else {
+          filteredDiscovered.forEach((group) => discoveredContainer.appendChild(makeGroupCard(group)));
+        }
+      }
+
+      async function refreshData() {
+        const result = await api("/api/groups");
+        groups = result.items || [];
+        renderGroups();
+      }
+
+      q("allowed-filter").addEventListener("input", renderGroups);
+      q("discovered-filter").addEventListener("input", renderGroups);
+
+      q("add-group-btn").onclick = async () => {
+        const jid = q("manual-group-jid").value.trim();
+        if (!jid) {
+          setStatus("Enter a group JID first.", true);
+          return;
+        }
+
+        try {
+          await withButtonBusy(q("add-group-btn"), () => api("/api/groups/allowed", {
+            method: "POST",
+            body: JSON.stringify({ jid }),
+          }));
+
+          q("manual-group-jid").value = "";
+          await refreshData();
+          setStatus("Group allowed.");
+        } catch (error) {
+          setStatus(error.message || "Could not allow group", true);
+        }
+      };
+
+      q("sync-groups-btn").onclick = async () => {
+        try {
+          const result = await withButtonBusy(q("sync-groups-btn"), () => api("/api/groups/sync", { method: "POST" }));
+          await refreshData();
+          setStatus(`Synced ${result.syncedCount || 0} groups from WhatsApp.`);
+        } catch (error) {
+          setStatus(error.message || "Could not sync groups", true);
+        }
+      };
+
+      (async () => {
+        const ok = await initShell({
+          pageKey: "groups",
+          title: "Groups",
+          subtitle: "Control which WhatsApp groups can trigger the assistant.",
+          onRefresh: refreshData,
+        });
+
+        if (!ok) return;
+        await refreshData();
+      })();
+    </script>
+  </body>
+</html>

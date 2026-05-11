@@ -63,6 +63,15 @@ function getRouteId(req: Request, res: Response): string | null {
   return id;
 }
 
+const adminPages = new Set([
+  "homework",
+  "timetable",
+  "appointments",
+  "tests",
+  "knowledge",
+  "groups",
+]);
+
 async function resolvePublicDir(): Promise<string> {
   const candidateDirs = [
     path.join(currentDir, "public"),
@@ -117,8 +126,20 @@ export async function createAdminServer(options: {
     res.redirect("/admin");
   });
 
+  app.use("/admin", express.static(publicDir));
+
   app.get("/admin", (_req, res) => {
     res.sendFile(path.join(publicDir, "index.html"));
+  });
+
+  app.get("/admin/:page", (req, res) => {
+    const page = req.params.page;
+    if (!adminPages.has(page)) {
+      res.status(404).send("Admin page not found");
+      return;
+    }
+
+    res.sendFile(path.join(publicDir, `${page}.html`));
   });
 
   app.post("/api/login", (req: Request, res: Response) => {

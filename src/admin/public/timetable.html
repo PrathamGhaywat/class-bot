@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Class AI Admin · Timetable</title>
+    <link rel="stylesheet" href="/admin/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">Class AI Admin</div>
+        <div class="brand-subtitle">Control panel</div>
+        <nav id="sidebar-nav" class="nav"></nav>
+      </aside>
+
+      <div class="content-shell">
+        <header class="topbar">
+          <div>
+            <h1 id="page-title" class="page-title"></h1>
+            <p id="page-subtitle" class="page-subtitle"></p>
+          </div>
+          <div class="toolbar">
+            <button id="refresh-btn" class="btn">Refresh</button>
+            <button id="logout-btn" class="btn-danger">Logout</button>
+          </div>
+        </header>
+
+        <div id="global-status" class="status hidden"></div>
+
+        <main class="page">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Add timetable entry</h2>
+                <p class="section-note">Create a new lesson slot with day, time range, and context fields.</p>
+              </div>
+            </div>
+
+            <div class="grid">
+              <select id="tt-day"></select>
+              <input id="tt-start" placeholder="Start time (08:15)" />
+              <input id="tt-end" placeholder="End time (09:00)" />
+              <input id="tt-subject" placeholder="Subject" />
+              <input id="tt-teacher" placeholder="Teacher" />
+              <input id="tt-room" placeholder="Room" />
+            </div>
+            <textarea id="tt-notes" placeholder="Notes" style="margin-top: 10px"></textarea>
+            <div class="row" style="margin-top: 10px">
+              <button id="add-tt-btn" class="btn-primary" style="width: auto">Add entry</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Manage timetable</h2>
+                <p class="section-note">Filter and edit schedule rows inline.</p>
+              </div>
+              <span id="tt-count" class="chip muted">0</span>
+            </div>
+
+            <input id="tt-search" placeholder="Filter by subject, teacher, room" />
+            <div id="timetable-list" class="list"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script type="module">
+      import {
+        api,
+        DAY_NAMES,
+        initShell,
+        normalizeOptional,
+        q,
+        renderEditableList,
+        setStatus,
+        withButtonBusy,
+      } from "/admin/shared.js";
+
+      const dayOptions = DAY_NAMES.map((label, value) => ({ value, label: `${value} · ${label}` }));
+      let timetableItems = [];
+
+      function renderDaySelect(selectEl) {
+        selectEl.innerHTML = "";
+        dayOptions.forEach((opt) => {
+          const option = document.createElement("option");
+          option.value = String(opt.value);
+          option.textContent = opt.label;
+          selectEl.appendChild(option);
+        });
+      }
+
+      function render() {
+        q("tt-count").textContent = String(timetableItems.length);
+
+        renderEditableList({
+          container: q("timetable-list"),
+          items: timetableItems,
+          emptyMessage: "No timetable entries yet.",
+          filterText: q("tt-search").value,
+          getTitle: (item) => `${DAY_NAMES[item.dayOfWeek] || `Day ${item.dayOfWeek}`} · ${item.startTime}-${item.endTime} · ${item.subject}`,
+          getMeta: (item) => `${item.teacher || "no teacher"} • room ${item.room || "n/a"} • ${item.notes || ""}`,
+          getFields: (item) => [
+            { name: "dayOfWeek", label: "Day", type: "select", value: item.dayOfWeek, options: dayOptions },
+            { name: "startTime", label: "Start", value: item.startTime },
+            { name: "endTime", label: "End", value: item.endTime },
+            { name: "subject", label: "Subject", value: item.subject },
+            { name: "teacher", label: "Teacher", value: item.teacher, nullable: true },
+            { name: "room", label: "Room", value: item.room, nullable: true },
+            { name: "notes", label: "Notes", type: "textarea", rows: 4, value: item.notes, nullable: true },
+          ],
+          onSave: (item, payload) => api(`/api/timetable/${item.id}`, {
+            method: "PUT",
+            body: JSON.stringify({ ...payload, dayOfWeek: Number(payload.dayOfWeek) }),
+          }),
+          onDelete: (item) => api(`/api/timetable/${item.id}`, { method: "DELETE" }),
+          onAfterChange: refreshData,
+        });
+      }
+
+      async function refreshData() {
+        const result = await api("/api/timetable");
+        timetableItems = result.items || [];
+        render();
+      }
+
+      q("tt-search").addEventListener("input", render);
+
+      q("add-tt-btn").onclick = async () => {
+        try {
+          await withButtonBusy(q("add-tt-btn"), async () => {
+            await api("/api/timetable", {
+              method: "POST",
+              body: JSON.stringify({
+                dayOfWeek: Number(q("tt-day").value),
+                startTime: q("tt-start").value,
+                endTime: q("tt-end").value,
+                subject: q("tt-subject").value,
+                teacher: normalizeOptional(q("tt-teacher").value),
+                room: normalizeOptional(q("tt-room").value),
+                notes: normalizeOptional(q("tt-notes").value),
+              }),
+            });
+          });
+
+          q("tt-start").value = "";
+          q("tt-end").value = "";
+          q("tt-subject").value = "";
+          q("tt-teacher").value = "";
+          q("tt-room").value = "";
+          q("tt-notes").value = "";
+
+          await refreshData();
+          setStatus("Timetable entry added.");
+        } catch (error) {
+          setStatus(error.message || "Could not add timetable entry", true);
+        }
+      };
+
+      (async () => {
+        renderDaySelect(q("tt-day"));
+        q("tt-day").value = "1";
+
+        const ok = await initShell({
+          pageKey: "timetable",
+          title: "Timetable",
+          subtitle: "Maintain weekly schedule entries with room, teacher, and notes.",
+          onRefresh: refreshData,
+        });
+
+        if (!ok) return;
+        await refreshData();
+      })();
+    </script>
+  </body>
+</html>

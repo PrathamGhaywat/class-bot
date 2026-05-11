@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Class AI Admin · Tests</title>
+    <link rel="stylesheet" href="/admin/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">Class AI Admin</div>
+        <div class="brand-subtitle">Control panel</div>
+        <nav id="sidebar-nav" class="nav"></nav>
+      </aside>
+
+      <div class="content-shell">
+        <header class="topbar">
+          <div>
+            <h1 id="page-title" class="page-title"></h1>
+            <p id="page-subtitle" class="page-subtitle"></p>
+          </div>
+          <div class="toolbar">
+            <button id="refresh-btn" class="btn">Refresh</button>
+            <button id="logout-btn" class="btn-danger">Logout</button>
+          </div>
+        </header>
+
+        <div id="global-status" class="status hidden"></div>
+
+        <main class="page">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Add test</h2>
+                <p class="section-note">Add upcoming tests with scope and context for AI answers.</p>
+              </div>
+            </div>
+
+            <div class="grid">
+              <input id="test-title" placeholder="Title" />
+              <input id="test-subject" placeholder="Subject" />
+              <input id="test-date" placeholder="Date (YYYY-MM-DD or ISO)" />
+              <input id="test-scope" placeholder="Scope" />
+            </div>
+            <textarea id="test-context" placeholder="Context" style="margin-top: 10px"></textarea>
+            <div class="row" style="margin-top: 10px">
+              <button id="add-test-btn" class="btn-primary" style="width: auto">Add test</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Manage tests</h2>
+                <p class="section-note">Filter and maintain tests inline.</p>
+              </div>
+              <span id="test-count" class="chip muted">0</span>
+            </div>
+            <input id="test-search" placeholder="Filter by title, subject, scope" />
+            <div id="tests-list" class="list"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script type="module">
+      import {
+        api,
+        initShell,
+        normalizeOptional,
+        q,
+        renderEditableList,
+        setStatus,
+        withButtonBusy,
+      } from "/admin/shared.js";
+
+      let testItems = [];
+
+      function render() {
+        q("test-count").textContent = String(testItems.length);
+
+        renderEditableList({
+          container: q("tests-list"),
+          items: testItems,
+          emptyMessage: "No tests yet.",
+          filterText: q("test-search").value,
+          getTitle: (item) => item.title,
+          getMeta: (item) => `${item.subject || "no subject"} • ${item.testDate} • ${item.scope || ""}`,
+          getFields: (item) => [
+            { name: "title", label: "Title", value: item.title },
+            { name: "subject", label: "Subject", value: item.subject, nullable: true },
+            { name: "testDate", label: "Test date", value: item.testDate },
+            { name: "scope", label: "Scope", value: item.scope, nullable: true },
+            { name: "context", label: "Context", type: "textarea", rows: 4, value: item.context, nullable: true },
+          ],
+          onSave: (item, payload) => api(`/api/tests/${item.id}`, { method: "PUT", body: JSON.stringify(payload) }),
+          onDelete: (item) => api(`/api/tests/${item.id}`, { method: "DELETE" }),
+          onAfterChange: refreshData,
+        });
+      }
+
+      async function refreshData() {
+        const result = await api("/api/tests");
+        testItems = result.items || [];
+        render();
+      }
+
+      q("test-search").addEventListener("input", render);
+
+      q("add-test-btn").onclick = async () => {
+        try {
+          await withButtonBusy(q("add-test-btn"), async () => {
+            await api("/api/tests", {
+              method: "POST",
+              body: JSON.stringify({
+                title: q("test-title").value,
+                subject: normalizeOptional(q("test-subject").value),
+                testDate: q("test-date").value,
+                scope: normalizeOptional(q("test-scope").value),
+                context: normalizeOptional(q("test-context").value),
+              }),
+            });
+          });
+
+          q("test-title").value = "";
+          q("test-subject").value = "";
+          q("test-date").value = "";
+          q("test-scope").value = "";
+          q("test-context").value = "";
+
+          await refreshData();
+          setStatus("Test added.");
+        } catch (error) {
+          setStatus(error.message || "Could not add test", true);
+        }
+      };
+
+      (async () => {
+        const ok = await initShell({
+          pageKey: "tests",
+          title: "Tests",
+          subtitle: "Track upcoming tests and revision context.",
+          onRefresh: refreshData,
+        });
+
+        if (!ok) return;
+        await refreshData();
+      })();
+    </script>
+  </body>
+</html>

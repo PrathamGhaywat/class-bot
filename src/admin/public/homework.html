@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Class AI Admin · Homework</title>
+    <link rel="stylesheet" href="/admin/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">Class AI Admin</div>
+        <div class="brand-subtitle">Control panel</div>
+        <nav id="sidebar-nav" class="nav"></nav>
+      </aside>
+
+      <div class="content-shell">
+        <header class="topbar">
+          <div>
+            <h1 id="page-title" class="page-title"></h1>
+            <p id="page-subtitle" class="page-subtitle"></p>
+          </div>
+          <div class="toolbar">
+            <button id="refresh-btn" class="btn">Refresh</button>
+            <button id="logout-btn" class="btn-danger">Logout</button>
+          </div>
+        </header>
+
+        <div id="global-status" class="status hidden"></div>
+
+        <main class="page">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Add homework</h2>
+                <p class="section-note">Create new homework records with subject, due date, and context.</p>
+              </div>
+            </div>
+
+            <div class="grid">
+              <input id="hw-title" placeholder="Title" />
+              <input id="hw-subject" placeholder="Subject" />
+              <input id="hw-due" placeholder="Due date (YYYY-MM-DD or ISO)" />
+            </div>
+            <textarea id="hw-description" placeholder="Description" style="margin-top: 10px"></textarea>
+            <div class="row" style="margin-top: 10px">
+              <button id="add-hw-btn" class="btn-primary" style="width: auto">Add homework</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Manage homework</h2>
+                <p class="section-note">Search, edit, and delete existing homework entries.</p>
+              </div>
+              <span id="hw-count" class="chip muted">0</span>
+            </div>
+            <input id="hw-search" placeholder="Filter by title, subject, description" />
+            <div id="homework-list" class="list"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script type="module">
+      import {
+        api,
+        initShell,
+        normalizeOptional,
+        q,
+        renderEditableList,
+        setStatus,
+        withButtonBusy,
+      } from "/admin/shared.js";
+
+      let homeworkItems = [];
+
+      function render() {
+        q("hw-count").textContent = String(homeworkItems.length);
+
+        renderEditableList({
+          container: q("homework-list"),
+          items: homeworkItems,
+          emptyMessage: "No homework yet.",
+          filterText: q("hw-search").value,
+          getTitle: (item) => item.title,
+          getMeta: (item) => `${item.subject || "no subject"} • due ${item.dueDate || "n/a"} • ${item.description || ""}`,
+          getFields: (item) => [
+            { name: "title", label: "Title", value: item.title },
+            { name: "subject", label: "Subject", value: item.subject, nullable: true },
+            { name: "dueDate", label: "Due date", value: item.dueDate, nullable: true },
+            { name: "description", label: "Description", type: "textarea", rows: 4, value: item.description, nullable: true },
+          ],
+          onSave: (item, payload) => api(`/api/homework/${item.id}`, { method: "PUT", body: JSON.stringify(payload) }),
+          onDelete: (item) => api(`/api/homework/${item.id}`, { method: "DELETE" }),
+          onAfterChange: refreshData,
+        });
+      }
+
+      async function refreshData() {
+        const result = await api("/api/homework");
+        homeworkItems = result.items || [];
+        render();
+      }
+
+      q("hw-search").addEventListener("input", render);
+
+      q("add-hw-btn").onclick = async () => {
+        try {
+          await withButtonBusy(q("add-hw-btn"), async () => {
+            await api("/api/homework", {
+              method: "POST",
+              body: JSON.stringify({
+                title: q("hw-title").value,
+                subject: normalizeOptional(q("hw-subject").value),
+                dueDate: normalizeOptional(q("hw-due").value),
+                description: normalizeOptional(q("hw-description").value),
+              }),
+            });
+          });
+
+          q("hw-title").value = "";
+          q("hw-subject").value = "";
+          q("hw-due").value = "";
+          q("hw-description").value = "";
+
+          await refreshData();
+          setStatus("Homework added.");
+        } catch (error) {
+          setStatus(error.message || "Could not add homework", true);
+        }
+      };
+
+      (async () => {
+        const ok = await initShell({
+          pageKey: "homework",
+          title: "Homework",
+          subtitle: "Track assignments, due dates, and context for students.",
+          onRefresh: refreshData,
+        });
+
+        if (!ok) return;
+        await refreshData();
+      })();
+    </script>
+  </body>
+</html>

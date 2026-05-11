@@ -111,6 +111,34 @@ function isRateLimitError(error: unknown): boolean {
   return false;
 }
 
+function isConnectionReplacedError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const maybe = error as {
+    message?: unknown;
+    output?: { statusCode?: number };
+    reasonNode?: { attrs?: { type?: string } };
+    data?: { reasonNode?: { attrs?: { type?: string } } };
+  };
+
+  if (maybe.output?.statusCode === DisconnectReason.connectionReplaced) {
+    return true;
+  }
+
+  const reasonType = maybe.reasonNode?.attrs?.type ?? maybe.data?.reasonNode?.attrs?.type;
+  if (typeof reasonType === "string" && reasonType.toLowerCase() === "replaced") {
+    return true;
+  }
+
+  if (typeof maybe.message === "string" && /conflict|replaced/i.test(maybe.message)) {
+    return true;
+  }
+
+  return false;
+}
+
 function scheduleReconnect(options: WhatsAppBotOptions): void {
   if (reconnectTimer) {
     return;
@@ -211,6 +239,7 @@ export async function startWhatsAppBot(options: WhatsAppBotOptions): Promise<voi
   }
 
   startupInProgress = true;
+  console.log(`[Bot] Starting WhatsApp socket (pid ${process.pid})...`);
   try {
     const { state, saveCreds } = await useMultiFileAuthState(options.authDir);
     const { version } = await fetchLatestBaileysVersion();
@@ -262,11 +291,18 @@ export async function startWhatsAppBot(options: WhatsAppBotOptions): Promise<voi
           activeSocket = null;
         }
 
-        if (statusCode !== DisconnectReason.loggedOut) {
+        const disconnectError = update.lastDisconnect?.error;
+
+        if (statusCode === DisconnectReason.loggedOut) {
+          console.error("WhatsApp session logged out. Delete auth dir and re-link.");
+        } else if (statusCode === DisconnectReason.connectionReplaced || isConnectionReplacedError(disconnectError)) {
+          console.error(
+            "WhatsApp session was replaced by another active client (conflict/replaced). " +
+              "Not reconnecting automatically. Stop other bot instances and restart this one.",
+          );
+        } else {
           console.log("WhatsApp disconnected.");
           scheduleReconnect(options);
-        } else {
-          console.error("WhatsApp session logged out. Delete auth dir and re-link.");
         }
         return;
       }
@@ -278,7 +314,7 @@ export async function startWhatsAppBot(options: WhatsAppBotOptions): Promise<voi
           reconnectTimer = null;
         }
 
-        console.log("WhatsApp bot connected.");
+        console.log(`WhatsApp bot connected (pid ${process.pid}).`);
         await maybeAutoSyncKnownGroups(sock, options.dataService);
       }
     });

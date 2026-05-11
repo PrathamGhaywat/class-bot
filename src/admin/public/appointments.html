@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Class AI Admin · Appointments</title>
+    <link rel="stylesheet" href="/admin/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">Class AI Admin</div>
+        <div class="brand-subtitle">Control panel</div>
+        <nav id="sidebar-nav" class="nav"></nav>
+      </aside>
+
+      <div class="content-shell">
+        <header class="topbar">
+          <div>
+            <h1 id="page-title" class="page-title"></h1>
+            <p id="page-subtitle" class="page-subtitle"></p>
+          </div>
+          <div class="toolbar">
+            <button id="refresh-btn" class="btn">Refresh</button>
+            <button id="logout-btn" class="btn-danger">Logout</button>
+          </div>
+        </header>
+
+        <div id="global-status" class="status hidden"></div>
+
+        <main class="page">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Add appointment</h2>
+                <p class="section-note">Use this for trips, events, meetings, and class activities.</p>
+              </div>
+            </div>
+
+            <div class="grid">
+              <input id="ap-title" placeholder="Title" />
+              <input id="ap-start" placeholder="Start datetime (ISO)" />
+              <input id="ap-end" placeholder="End datetime (optional)" />
+              <input id="ap-location" placeholder="Location" />
+              <input id="ap-kind" placeholder="Kind (trip, class, meeting...)" />
+            </div>
+            <textarea id="ap-description" placeholder="Description" style="margin-top: 10px"></textarea>
+            <div class="row" style="margin-top: 10px">
+              <button id="add-ap-btn" class="btn-primary" style="width: auto">Add appointment</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Manage appointments</h2>
+                <p class="section-note">Filter and edit events inline.</p>
+              </div>
+              <span id="ap-count" class="chip muted">0</span>
+            </div>
+            <input id="ap-search" placeholder="Filter by title, location, kind" />
+            <div id="appointments-list" class="list"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script type="module">
+      import {
+        api,
+        initShell,
+        normalizeOptional,
+        q,
+        renderEditableList,
+        setStatus,
+        withButtonBusy,
+      } from "/admin/shared.js";
+
+      let appointmentItems = [];
+
+      function render() {
+        q("ap-count").textContent = String(appointmentItems.length);
+
+        renderEditableList({
+          container: q("appointments-list"),
+          items: appointmentItems,
+          emptyMessage: "No appointments yet.",
+          filterText: q("ap-search").value,
+          getTitle: (item) => item.title,
+          getMeta: (item) => `${item.startAt} → ${item.endAt || "open"} • ${item.location || "no location"} • ${item.kind || ""}`,
+          getFields: (item) => [
+            { name: "title", label: "Title", value: item.title },
+            { name: "description", label: "Description", type: "textarea", rows: 4, value: item.description, nullable: true },
+            { name: "startAt", label: "Start datetime", value: item.startAt },
+            { name: "endAt", label: "End datetime", value: item.endAt, nullable: true },
+            { name: "location", label: "Location", value: item.location, nullable: true },
+            { name: "kind", label: "Kind", value: item.kind, nullable: true },
+          ],
+          onSave: (item, payload) => api(`/api/appointments/${item.id}`, { method: "PUT", body: JSON.stringify(payload) }),
+          onDelete: (item) => api(`/api/appointments/${item.id}`, { method: "DELETE" }),
+          onAfterChange: refreshData,
+        });
+      }
+
+      async function refreshData() {
+        const result = await api("/api/appointments");
+        appointmentItems = result.items || [];
+        render();
+      }
+
+      q("ap-search").addEventListener("input", render);
+
+      q("add-ap-btn").onclick = async () => {
+        try {
+          await withButtonBusy(q("add-ap-btn"), async () => {
+            await api("/api/appointments", {
+              method: "POST",
+              body: JSON.stringify({
+                title: q("ap-title").value,
+                description: normalizeOptional(q("ap-description").value),
+                startAt: q("ap-start").value,
+                endAt: normalizeOptional(q("ap-end").value),
+                location: normalizeOptional(q("ap-location").value),
+                kind: normalizeOptional(q("ap-kind").value),
+              }),
+            });
+          });
+
+          q("ap-title").value = "";
+          q("ap-description").value = "";
+          q("ap-start").value = "";
+          q("ap-end").value = "";
+          q("ap-location").value = "";
+          q("ap-kind").value = "";
+
+          await refreshData();
+          setStatus("Appointment added.");
+        } catch (error) {
+          setStatus(error.message || "Could not add appointment", true);
+        }
+      };
+
+      (async () => {
+        const ok = await initShell({
+          pageKey: "appointments",
+          title: "Appointments",
+          subtitle: "Store and manage class events, trips, and activities.",
+          onRefresh: refreshData,
+        });
+
+        if (!ok) return;
+        await refreshData();
+      })();
+    </script>
+  </body>
+</html>
